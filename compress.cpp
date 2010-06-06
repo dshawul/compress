@@ -643,7 +643,11 @@ void COMP_INFO::compress(char* inf_name,char* ouf_name) {
 	fclose(pf);
 
 	char command[512];
+#ifdef _MSC_VER
 	sprintf(command,"del %s",temp_name);
+#else
+	sprintf(command,"rm -r %s",temp_name);
+#endif
 	system(command);
 
 	/*

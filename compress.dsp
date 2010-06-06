@@ -100,6 +100,10 @@ SOURCE=.\compress.cpp
 
 SOURCE=.\decompress.cpp
 # End Source File
+# Begin Source File
+
+SOURCE=.\main.cpp
+# End Source File
 # End Group
 # Begin Group "Header Files"
 

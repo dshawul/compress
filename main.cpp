@@ -1,10 +1,10 @@
 #include "codec.h"
-
+#include <cstring>
 enum {
 	NONE,COMPRESS = 1,DECOMPRESS = 2,INPUT_FILE = 4,OUTPUT_FILE = 8
 };
 
-void main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
 
 	COMP_INFO comp_info;
 	int comp_mode = NONE;
@@ -29,4 +29,5 @@ void main(int argc, char *argv[]) {
 	} else if(comp_mode == (DECOMPRESS | INPUT_FILE | OUTPUT_FILE) ){
 		comp_info.decompress(input_fname,output_fname);
 	}
+	return 0;
 }

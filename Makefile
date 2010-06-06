@@ -3,13 +3,14 @@ CFLAGS = -O3
 DEFINES =
 LDFLAGS = 
 
+EXE = compress
 RM = rm -rf
 OBJ = main.o decompress.o codec.o compress.o
 
-egbbso.so: $(OBJ)
-	$(CC) $(CFLAGS) $(DEFINES) $(LDFLAGS) $(OBJ) -shared -o egbbso.so -lm -lpthread
+$(EXE): $(OBJ)
+	$(CC) $(CFLAGS) $(DEFINES) $(LDFLAGS) $(OBJ) -o $(EXE)
 
 %.o: %.cpp
-	$(CC) $(CFLAGS) $(DEFINES) -c -fPIC $<
+	$(CC) $(CFLAGS) $(DEFINES) -c $<
 clean:
 	$(RM) $(OBJ)

@@ -1,4 +1,6 @@
 #include "codec.h"
+#include <cstring>
+#include <cstdlib>
 
 /*
 distance code

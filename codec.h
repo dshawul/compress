@@ -130,6 +130,7 @@ class COMP_INFO {
 
 public:
 	FILE*   pf;
+	char    output_fname[256];
 	UBMP32* index_table;
 	UBMP32  size,
 		    orgsize,

@@ -18,6 +18,7 @@ int main(int argc, char *argv[]) {
 	int comp_mode = COMPRESS;
 	FILE *input = stdin,*output = stdout;
 	
+	strcpy(comp_info.output_fname,"stdout");
 	for(int i = 0; i < argc; i++) {
 		if(!strcmp(argv[i],"-c")) {
 			comp_mode = COMPRESS;
@@ -26,6 +27,7 @@ int main(int argc, char *argv[]) {
 		} else if(!strcmp(argv[i],"-i")) {
 			input = fopen(argv[i+1],"rb");
 		} else if(!strcmp(argv[i],"-o")) {
+			strcpy(comp_info.output_fname,argv[i+1]);
 			output = fopen(argv[i+1],"wb");
 		} else if(!strcmp(argv[i],"-h")) {
 			print_help();

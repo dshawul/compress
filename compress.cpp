@@ -520,8 +520,8 @@ void COMP_INFO::compress(FILE* inputf,FILE* outputf) {
 	BMP32 temp;
 
 	//allocate tables
-	in_table    = new UBMP8[4 * BLOCK_SIZE];
-	out_table   = new UBMP8[4 * BLOCK_SIZE];
+	in_table    = new UBMP8[2 * BLOCK_SIZE];
+	out_table   = new UBMP8[2 * BLOCK_SIZE];
 	huffman.cann = new CANN[huffman.MAX_LEAFS];
 	huffman.nodes = new NODE[huffman.MAX_NODES];
 	huffman_pos.cann = new CANN[huffman_pos.MAX_LEAFS];
@@ -530,7 +530,9 @@ void COMP_INFO::compress(FILE* inputf,FILE* outputf) {
 	/**********************************************************
      * Compress using Lempel Ziv and collect frequencey
 	 **********************************************************/
-	char temp_name[32] = "temp.lz";
+	char temp_name[512];
+	sprintf(temp_name,"%s.lz",output_fname);
+
 	std::list<UBMP32> lindex;
 	{
 		pf = fopen(temp_name,"wb");

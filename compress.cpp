@@ -1,6 +1,8 @@
 #include "codec.h"
 #include <cstring>
 #include <cstdlib>
+#include <vector>
+#include <list>
 
 /*
 distance code
@@ -118,20 +120,31 @@ static UBMP32 lz_encode(UBMP8* in_table,UBMP8* out_table,UBMP32 size) {
 
 		if(pair.len) {
 
-            //lazy match
+			//lazy match
 			i = 0;
 			do {
+				if(pair.len >= MAX_MATCH_LENGTH)
+					break;
+
 				pair1 = find_match(in + 1,ine);
-				
+
 				if(pair1.len > pair.len) {
 					pair = pair1;
-					
+
+					//write literal byte
 					temp_code = (0 << LITERAL_BITS) | (*in);
 					code = ((code << F_LITERAL_BITS) | temp_code);
 					length += F_LITERAL_BITS;
-					
+
 					LINK::list[*in].add(in);
 					in++;
+
+					while(length >= 8) {
+						length -= 8;
+						*out++ = UBMP8((code >> length) & _byte_1);
+						code &= (_byte_all >> (64 - length));
+					}
+					
 				} else {
 					break;
 				}
@@ -391,7 +404,7 @@ void COMP_INFO::collect_frequency(UBMP8* in_table,UBMP32 size) {
 			huffman.nodes[d].symbol = d;
 			huffman.nodes[d].freq++;
 		    huffman.nodes[d].skip = 0;
-			
+		
 			d_code(d,pair.pos);
 			huffman_pos.nodes[d].symbol = d;
 			huffman_pos.nodes[d].freq++;
@@ -498,164 +511,143 @@ int COMP_INFO::encode(
 
 	return (out - out_table);
 }
-/*
-compress
-*/
-void COMP_INFO::compress(char* inf_name,char* ouf_name) {
-	FILE *inf;
-	UBMP8 *in_table,
-		  *out_table,
-		  *ptr;
+/***********************************
+ * compress -c -i input -o output
+ **********************************/
+void COMP_INFO::compress(FILE* inputf,FILE* outputf) {
+	UBMP8 *in_table,*out_table,*ptr;
 	UBMP32 i,j,buffer_size,index_start;
 	BMP32 temp;
 
-	//open file
-	inf = fopen(inf_name,"rb");
-	 
-	//get size of file and allocate buffers
-	fseek(inf,0,SEEK_END);
-	orgsize = ftell(inf);
-	n_blocks = (orgsize / BLOCK_SIZE) + ((orgsize % BLOCK_SIZE) != 0);
-	size = (n_blocks * BLOCK_SIZE);
-    fseek(inf,0,SEEK_SET);
-
 	//allocate tables
-	in_table    = new UBMP8[2 * BLOCK_SIZE];
-	out_table   = new UBMP8[2 * BLOCK_SIZE];
-	index_table = new UBMP32[n_blocks + 1];
+	in_table    = new UBMP8[4 * BLOCK_SIZE];
+	out_table   = new UBMP8[4 * BLOCK_SIZE];
 	huffman.cann = new CANN[huffman.MAX_LEAFS];
 	huffman.nodes = new NODE[huffman.MAX_NODES];
 	huffman_pos.cann = new CANN[huffman_pos.MAX_LEAFS];
 	huffman_pos.nodes = new NODE[huffman_pos.MAX_NODES];
 
-	//start compressing
-	printf("compressing %s\n",inf_name);
+	/**********************************************************
+     * Compress using Lempel Ziv and collect frequencey
+	 **********************************************************/
+	char temp_name[32] = "temp.lz";
+	std::list<UBMP32> lindex;
+	{
+		pf = fopen(temp_name,"wb");
 
-	/*
-    compress using Lempel Ziv
-	*/
-	char temp_name[512];
-	strcpy(temp_name,ouf_name);
-	strcat(temp_name,".lz");
+		char c;
+		bool last = false;
+		n_blocks = 0;
+		cmpsize = 0;
+		orgsize = 0;
+		while(!last) {
+			lindex.push_back(cmpsize);
 
-	pf = fopen(temp_name,"wb");
+			buffer_size = 0;
+			ptr = in_table;
+			while (buffer_size < BLOCK_SIZE) {
+				c = fgetc(inputf);
+				if(c == EOF) {
+					last = true;
+					break;
+				}
+				*ptr++ = (UBMP8)c;
+				buffer_size++;
+			}
+			orgsize += buffer_size;
 
-	cmpsize = 0;
-	for(i = 0; i < n_blocks;i++) {
-		buffer_size = (i == n_blocks - 1) ? (orgsize - i * BLOCK_SIZE) : BLOCK_SIZE;
-		index_table[i] = cmpsize;
+			buffer_size = lz_encode(in_table,out_table,buffer_size);
+			collect_frequency(out_table,buffer_size);
 
-		ptr = in_table;
-		for(j = 0;j < buffer_size;j++)
-			*ptr++ = (UBMP8) fgetc(inf);
-		
-		buffer_size = lz_encode(in_table,out_table,buffer_size);
-		collect_frequency(out_table,buffer_size);
+			for(j = 0;j < buffer_size;j++)
+				fputc(out_table[j],pf);
 
-		for(j = 0;j < buffer_size;j++)
-			fputc(out_table[j],pf);
+			cmpsize += buffer_size;
+			n_blocks++;
+		}
+		lindex.push_back(cmpsize);
+		size = n_blocks * BLOCK_SIZE;
 
-		cmpsize += buffer_size;
+		//end of block marker
+		huffman.nodes[EOB_MARKER].symbol = EOB_MARKER;
+		huffman.nodes[EOB_MARKER].freq = 1;
+		huffman.nodes[EOB_MARKER].skip = 0;
+
+		fclose(pf);
+
+		//build cannonical huffman code
+		huffman.build_cann_from_nodes();
+		huffman_pos.build_cann_from_nodes();
 	}
-	index_table[i] = cmpsize;
+	std::vector<UBMP32> vindex(lindex.begin(), lindex.end());
+	lindex.clear();
 
-	//end of block marker
-	huffman.nodes[EOB_MARKER].symbol = EOB_MARKER;
-	huffman.nodes[EOB_MARKER].freq = 1;
-    huffman.nodes[EOB_MARKER].skip = 0;
-
-	fclose(pf);
-	fclose(inf);
-
-	/*
-	build cannonical huffman code
-	*/
-	huffman.build_cann_from_nodes();
-	huffman_pos.build_cann_from_nodes();
-
-	/*
-	write header of file
-	*/
-	pf = fopen(ouf_name,"wb");
+	/************************
+	 * write header of file
+	 ************************/
 
 	//write count
-	fwrite(&orgsize,4,1,pf);
-	fwrite(&cmpsize,4,1,pf);
-    fwrite(&n_blocks,4,1,pf);
+	fwrite(&orgsize,4,1,outputf);
+	fwrite(&cmpsize,4,1,outputf);
+    fwrite(&n_blocks,4,1,outputf);
 	block_size = BLOCK_SIZE;
-	fwrite(&block_size,4,1,pf);
+	fwrite(&block_size,4,1,outputf);
 
 	//write reserve bytes
 	for(i = 0;i < 10;i++)
-	   fwrite(&temp,4,1,pf);
+	   fwrite(&temp,4,1,outputf);
 
 	//write length
 	for(i = 0; i < huffman.MAX_LEAFS; i++)
-		fwrite(&huffman.cann[i].length,1,1,pf);
+		fwrite(&huffman.cann[i].length,1,1,outputf);
 
 	//write length
 	for(i = 0; i < huffman_pos.MAX_LEAFS; i++)
-		fwrite(&huffman_pos.cann[i].length,1,1,pf);
+		fwrite(&huffman_pos.cann[i].length,1,1,outputf);
 
-	index_start = ftell(pf);
+	index_start = ftell(outputf);
 
 	//write index table
 	for(i = 0; i < n_blocks + 1;i++)
-		fwrite(&index_table[i],4,1,pf);
+		fwrite(&vindex[i],4,1,outputf);
 
-	read_start = ftell(pf);
+	/***********************************
+	 * Compress using huffman
+	 ***********************************/
+	{
+		FILE* inf = fopen(temp_name,"rb");
 
-	/*
-	compress using huffman
-	*/
-	inf = fopen(temp_name,"rb");
+		cmpsize = 0;
+		for(i = 0; i < n_blocks;i++) {
+			buffer_size = vindex[i + 1] - vindex[i];
+			vindex[i] = cmpsize;
 
-	cmpsize = 0;
-	for(i = 0; i < n_blocks;i++) {
-		buffer_size = index_table[i + 1] - index_table[i];
-		index_table[i] = cmpsize;
+			ptr = in_table;
+			for(j = 0;j < buffer_size;j++)
+				*ptr++ = (UBMP8) fgetc(inf);
 
-		ptr = in_table;
-		for(j = 0;j < buffer_size;j++)
-			*ptr++ = (UBMP8) fgetc(inf);
+			buffer_size = encode(in_table,out_table,buffer_size);
 
-		buffer_size = encode(in_table,out_table,buffer_size);
+			for(j = 0;j < buffer_size;j++)
+				fputc(out_table[j],outputf);
 
-		for(j = 0;j < buffer_size;j++)
-			fputc(out_table[j],pf);
-		
-		cmpsize += buffer_size;
+			cmpsize += buffer_size;
+		}
+		vindex[i] = cmpsize;
+
+		//write updated index info
+		fseek(outputf,index_start,SEEK_SET);
+
+		for(i = 0; i < n_blocks + 1;i++)
+			fwrite(&vindex[i],4,1,outputf);
+
+		fclose(inf);
+		remove(temp_name);
 	}
-	index_table[i] = cmpsize;
 
-	/*
-	write updated index info
-	*/
-	fseek(pf,index_start,SEEK_SET);
-
-	for(i = 0; i < n_blocks + 1;i++)
-		fwrite(&index_table[i],4,1,pf);
-
-	/*
-	close files and delete temporary file
-	*/
-	fclose(inf);
-	fclose(pf);
-
-	char command[512];
-#ifdef _MSC_VER
-	sprintf(command,"del %s",temp_name);
-#else
-	sprintf(command,"rm -r %s",temp_name);
-#endif
-	system(command);
-
-	/*
-	free memory
-	*/
+	//free memory
 	delete[] in_table;
 	delete[] out_table;
-	delete[] index_table;
 	delete[] huffman.cann;
 	delete[] huffman.nodes;
 	delete[] huffman_pos.cann;

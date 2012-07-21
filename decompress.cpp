@@ -169,15 +169,12 @@ int COMP_INFO::decode(
 /*
 open encoded file
 */
-bool COMP_INFO::open(char* name) {
+bool COMP_INFO::open(FILE* myf) {
     UBMP32 i;
 	
-	//open file
-	pf = fopen(name,"rb");
-	if(!pf) {
-		return false;
-	}
+	pf = myf;
 
+	//open file
 	huffman.cann = new CANN[huffman.MAX_LEAFS];
 	huffman_pos.cann = new CANN[huffman_pos.MAX_LEAFS];
 
@@ -221,36 +218,19 @@ bool COMP_INFO::open(char* name) {
 	return true;
 }
 /*
-bench mark decompression speed
+decompress file
 */
-#include <time.h>
-
-#ifndef CLOCKS_PER_SEC
-  #define CLOCKS_PER_SEC CLK_TCK
-#endif
-
-void COMP_INFO::decompress(char* inf_name,char* ouf_name) {
-
+void COMP_INFO::decompress(FILE* inf,FILE* outf) {
 	UBMP32 i,start;
 	UBMP8 buffer[2 * BLOCK_SIZE];
 	UBMP8 buffer2[2 * BLOCK_SIZE];
 	UBMP32 buffer_size;
 	UBMP32 uncomp_size;
 
-	clock_t start_t, end_t;
-	double seconds;
-
 	//open compressed file
-	open(inf_name);
-
-	//open ouput file
-	FILE* outf = fopen(ouf_name,"wb");
-
-	//start decompressing
-	printf("decompressing %s\n",inf_name);
+	open(inf);
 
 	//decompress each block
-	start_t = clock();
     for(i = 0; i < n_blocks;i++) {
 	
 		if(i == n_blocks - 1) uncomp_size = orgsize - i * BLOCK_SIZE;
@@ -268,13 +248,6 @@ void COMP_INFO::decompress(char* inf_name,char* ouf_name) {
 		for(UBMP32 k = 0;k < uncomp_size;k++)
 		   fputc(buffer2[k],outf);
 	}
-
-	//end
-	fclose(outf);
-	end_t = clock();
-    seconds = (double)(end_t - start_t) / CLOCKS_PER_SEC;
-	printf ("%g seconds, %dMb, %gMb/sec\n", 
-		seconds, size/(1024*1024), size/(1024*1024) / seconds);
 }
 /*
 end

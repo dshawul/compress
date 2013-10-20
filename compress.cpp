@@ -65,7 +65,7 @@ static PAIR find_match(UBMP8* in,UBMP8* ine) {
 		
 		//get position
 		swindow = current->val;
-		pair.pos = in - swindow;
+		pair.pos = int(in - swindow);
 		
 		if(pair.pos >= WINDOW_SIZE)
 			break;
@@ -79,7 +79,7 @@ static PAIR find_match(UBMP8* in,UBMP8* ine) {
 			swindow++;
 			lahead++;
 		} 
-		pair.len = lahead - in;
+		pair.len = int(lahead - in);
 		
 		//prefer long and closer matches
 		if(pair.len >= MIN_MATCH_LENGTH
@@ -115,6 +115,19 @@ static UBMP32 lz_encode(UBMP8* in_table,UBMP8* out_table,UBMP32 size) {
 	
 	LINK::clear();
 
+#define WRITE_LITERAL() {								\
+	temp_code = (0 << LITERAL_BITS) | (*in);			\
+	code = ((code << F_LITERAL_BITS) | temp_code);		\
+	length += F_LITERAL_BITS;							\
+}
+
+#define WRITE_PAIR() {									\
+	temp_code = (1 << PAIR_BITS) | ((pair.len -			\
+		MIN_MATCH_LENGTH) << DISTANCE_BITS) | pair.pos;	\
+	code = ((code << F_PAIR_BITS) | temp_code);			\
+	length += F_PAIR_BITS;								\
+}
+
 	while(in < ine) {
 	    pair = find_match(in,ine);
 
@@ -132,9 +145,7 @@ static UBMP32 lz_encode(UBMP8* in_table,UBMP8* out_table,UBMP32 size) {
 					pair = pair1;
 
 					//write literal byte
-					temp_code = (0 << LITERAL_BITS) | (*in);
-					code = ((code << F_LITERAL_BITS) | temp_code);
-					length += F_LITERAL_BITS;
+					WRITE_LITERAL();
 
 					LINK::list[*in].add(in);
 					in++;
@@ -151,10 +162,8 @@ static UBMP32 lz_encode(UBMP8* in_table,UBMP8* out_table,UBMP32 size) {
 				i++;
 			} while(in < ine && i < pair.len);
 
-            //end
-			temp_code = (1 << PAIR_BITS) | ((pair.len - MIN_MATCH_LENGTH) << DISTANCE_BITS) | pair.pos;
-			code = ((code << F_PAIR_BITS) | temp_code);
-			length += F_PAIR_BITS;
+            //write pair bytes
+			WRITE_PAIR();
 
 			for(i = 0;i < pair.len;i++) {
 				LINK::list[*in].add(in);
@@ -163,9 +172,8 @@ static UBMP32 lz_encode(UBMP8* in_table,UBMP8* out_table,UBMP32 size) {
 
 		} else {
 
-			temp_code = (0 << LITERAL_BITS) | (*in);
-			code = ((code << F_LITERAL_BITS) | temp_code);
-			length += F_LITERAL_BITS;
+			//write literal byte
+			WRITE_LITERAL();
 
 			LINK::list[*in].add(in);
 			in++;
@@ -182,7 +190,7 @@ static UBMP32 lz_encode(UBMP8* in_table,UBMP8* out_table,UBMP32 size) {
 		*out++ = UBMP8((code  << (-length)) & _byte_1);
 	}
 
-	return (out - out_table);
+	return int(out - out_table);
 }
 /*
 Huffman
@@ -509,14 +517,14 @@ int COMP_INFO::encode(
 		*out++ = UBMP8((o_code  << (-o_length)) & _byte_1);
 	}
 
-	return (out - out_table);
+	return int(out - out_table);
 }
 /***********************************
  * compress -c -i input -o output
  **********************************/
 void COMP_INFO::compress(FILE* inputf,FILE* outputf) {
-	UBMP8 *in_table,*out_table,*ptr;
-	UBMP32 i,j,buffer_size,index_start;
+	UBMP8 *in_table,*out_table;
+	UBMP32 i,buffer_size,index_start;
 	BMP32 temp;
 
 	//allocate tables
@@ -537,7 +545,6 @@ void COMP_INFO::compress(FILE* inputf,FILE* outputf) {
 	{
 		pf = fopen(temp_name,"wb");
 
-		char c;
 		bool last = false;
 		n_blocks = 0;
 		cmpsize = 0;
@@ -545,24 +552,15 @@ void COMP_INFO::compress(FILE* inputf,FILE* outputf) {
 		while(!last) {
 			lindex.push_back(cmpsize);
 
-			buffer_size = 0;
-			ptr = in_table;
-			while (buffer_size < BLOCK_SIZE) {
-				c = fgetc(inputf);
-				if(c == EOF) {
-					last = true;
-					break;
-				}
-				*ptr++ = (UBMP8)c;
-				buffer_size++;
-			}
+			buffer_size = (UBMP32)fread(in_table,1,BLOCK_SIZE,inputf);
+			if(buffer_size < BLOCK_SIZE)
+				last = true;
 			orgsize += buffer_size;
 
 			buffer_size = lz_encode(in_table,out_table,buffer_size);
 			collect_frequency(out_table,buffer_size);
 
-			for(j = 0;j < buffer_size;j++)
-				fputc(out_table[j],pf);
+			fwrite(out_table,1,buffer_size,pf);
 
 			cmpsize += buffer_size;
 			n_blocks++;
@@ -624,14 +622,9 @@ void COMP_INFO::compress(FILE* inputf,FILE* outputf) {
 			buffer_size = vindex[i + 1] - vindex[i];
 			vindex[i] = cmpsize;
 
-			ptr = in_table;
-			for(j = 0;j < buffer_size;j++)
-				*ptr++ = (UBMP8) fgetc(inf);
-
+			fread(in_table,1,buffer_size,inf);
 			buffer_size = encode(in_table,out_table,buffer_size);
-
-			for(j = 0;j < buffer_size;j++)
-				fputc(out_table[j],outputf);
+			fwrite(out_table,1,buffer_size,outputf);
 
 			cmpsize += buffer_size;
 		}

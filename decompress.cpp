@@ -164,7 +164,7 @@ int COMP_INFO::decode(
 		}
 	}
 
-	return (out - out_table);
+	return int(out - out_table);
 }
 /*
 open encoded file
@@ -241,12 +241,11 @@ void COMP_INFO::decompress(FILE* inf,FILE* outf) {
 
 		start = read_start + index_table[i];
 		fseek(pf,start,SEEK_SET);
-		fread(&buffer,buffer_size,1,pf);
+		fread(&buffer,1,buffer_size,pf);
 
 		buffer_size = decode(buffer,buffer2,buffer_size);
 
-		for(UBMP32 k = 0;k < uncomp_size;k++)
-		   fputc(buffer2[k],outf);
+		fwrite(&buffer2,1,uncomp_size,outf);
 	}
 }
 /*

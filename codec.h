@@ -1,6 +1,12 @@
 #ifndef __COMPRESS__
 #define __COMPRESS__
 
+#ifdef _MSC_VER
+#    define _CRT_SECURE_NO_DEPRECATE
+#    define _SCL_SECURE_NO_DEPRECATE
+#    pragma warning (disable: 4127)
+#endif
+
 #include <stdio.h>
 
 #include "my_types.h"

@@ -151,10 +151,13 @@ public:
 	bool open(FILE*);
 	void compress(FILE*,FILE*);
 	void decompress(FILE*,FILE*);
+	void write_crc(bool);
 	void collect_frequency(UBMP8*,UBMP32);
 	int encode(UBMP8*,UBMP8*,UBMP32);
 	int decode(UBMP8*,UBMP8*,UBMP32);
 	UBMP64 read_bytes(int);
 };
+
+unsigned long Crc32_ComputeBuf(unsigned long inCrc32, const void *buf,unsigned int bufLen);
 
 #endif

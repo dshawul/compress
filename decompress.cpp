@@ -185,9 +185,8 @@ bool COMP_INFO::open(FILE* myf) {
 	block_size = (UBMP32) read_bytes(4);
 
 	//read reserve bytes
-	for(i = 0;i < 10;i++) {
+	for(i = 0;i < 10;i++)
 	   read_bytes(4);
-	}
 
 	//read length
 	for(i = 0; i < huffman.MAX_LEAFS; i++) {

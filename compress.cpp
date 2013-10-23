@@ -520,7 +520,7 @@ int COMP_INFO::encode(
 	return int(out - out_table);
 }
 /***********************************
- * compress -c -i input -o output
+ * compress
  **********************************/
 void COMP_INFO::compress(FILE* inputf,FILE* outputf) {
 	UBMP8 *in_table,*out_table;
@@ -585,7 +585,6 @@ void COMP_INFO::compress(FILE* inputf,FILE* outputf) {
 	/************************
 	 * write header of file
 	 ************************/
-
 	//write count
 	fwrite(&orgsize,4,1,outputf);
 	fwrite(&cmpsize,4,1,outputf);
@@ -647,4 +646,38 @@ void COMP_INFO::compress(FILE* inputf,FILE* outputf) {
 	delete[] huffman.nodes;
 	delete[] huffman_pos.cann;
 	delete[] huffman_pos.nodes;
+}
+
+/**************************************
+Cyclic Redundancy Check (CRC)
+***************************************/
+void COMP_INFO::write_crc(bool wrt) {
+	unsigned int bufLen;
+    unsigned char buf[BLOCK_SIZE];
+	unsigned long outCrc32 = 0,savedCrc32;
+
+	pf = fopen(output_fname,"rb+");
+	if(!pf) return;
+	bufLen = (unsigned int) fread(buf,1,16,pf);
+	outCrc32 = Crc32_ComputeBuf(outCrc32, buf,bufLen);
+	savedCrc32 = (UBMP32) read_bytes(4);
+	fseek(pf,56,SEEK_SET);
+    while(true) {
+        bufLen = (unsigned int) fread(buf,1,BLOCK_SIZE,pf);
+		if(bufLen == 0) break;
+        outCrc32 = Crc32_ComputeBuf(outCrc32, buf, bufLen);
+    }
+	if(wrt) {
+		fseek(pf,16,SEEK_SET);
+		fwrite(&outCrc32,4,1,pf);
+	}
+	fclose(pf);
+
+	if(!wrt) {
+		if(savedCrc32 != outCrc32) {
+			printf("\"%s\" is Corrupted!!!\n",output_fname);
+		} else {
+			printf("\"%s\" is OK!\n",output_fname);
+		}
+	}
 }

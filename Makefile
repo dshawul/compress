@@ -5,7 +5,7 @@ LDFLAGS =
 
 EXE = compress
 RM = rm -rf
-OBJ = main.o decompress.o codec.o compress.o
+OBJ = main.o decompress.o codec.o compress.o crc32.o
 
 $(EXE): $(OBJ)
 	$(CC) $(CFLAGS) $(DEFINES) $(LDFLAGS) $(OBJ) -o $(EXE)

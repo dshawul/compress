@@ -29,8 +29,15 @@ const int base_length[] = {
 };
 
 COMP_INFO::COMP_INFO() {
+	index_table = 0;
+	huffman.cann = 0;
+	huffman_pos.cann = 0;
 	huffman.MAX_LEAFS = LITERAL_CODES;
 	huffman.MAX_NODES = 2 * huffman.MAX_LEAFS - 1;
 	huffman_pos.MAX_LEAFS = DISTANCE_CODES;
 	huffman_pos.MAX_NODES = 2 * huffman_pos.MAX_LEAFS - 1;
 }
+
+COMP_INFO::~COMP_INFO() {
+}
+

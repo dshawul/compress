@@ -22,10 +22,10 @@ distance code
 simple linked list to accelerate searching matches
 */
 struct LINK {
-	UBMP8* val;
+	const UBMP8* val;
 	LINK* next;
 
-	void add(UBMP8* c) {
+	void add(const UBMP8* c) {
 		free_link->val = val;
 		free_link->next = next;
 		val = c;
@@ -55,9 +55,9 @@ void LINK::clear() {
 /*
 find match
 */
-static PAIR find_match(UBMP8* in,UBMP8* ine) {
+static PAIR find_match(const UBMP8* in,const UBMP8* ine) {
 
-	UBMP8 *swindow,*lahead;
+	const UBMP8 *swindow,*lahead;
 	PAIR pairm,pair;
 	
 	LINK* current = &LINK::list[*in];
@@ -99,40 +99,26 @@ static PAIR find_match(UBMP8* in,UBMP8* ine) {
 /*
 encode using lempel ziv algorithm.
 */
-static UBMP32 lz_encode(UBMP8* in_table,UBMP8* out_table,UBMP32 size) {
+int COMP_INFO::encode_lz(
+				    const UBMP8* in_table,
+		            UBMP8* out_table,
+					const UBMP32 size
+				 ) {
 
 	register int i;
-	UBMP8* in = in_table;
-	UBMP8* ine = in_table + size;
-	UBMP8* swindow = in_table;
+	const UBMP8* in = in_table;
+	const UBMP8* ine = in_table + size;
+	const UBMP8* swindow = in_table;
 	UBMP8* out = out_table;
 	PAIR pair;
 	PAIR pair1;
-
-	UBMP8 length = 0;
-	UBMP64 code = 0;
-	UBMP32 temp_code = 0;
-	
+	BITSET bs(in,out);
 	LINK::clear();
-
-#define WRITE_LITERAL() {								\
-	temp_code = (0 << LITERAL_BITS) | (*in);			\
-	code = ((code << F_LITERAL_BITS) | temp_code);		\
-	length += F_LITERAL_BITS;							\
-}
-
-#define WRITE_PAIR() {									\
-	temp_code = (1 << PAIR_BITS) | ((pair.len -			\
-		MIN_MATCH_LENGTH) << DISTANCE_BITS) | pair.pos;	\
-	code = ((code << F_PAIR_BITS) | temp_code);			\
-	length += F_PAIR_BITS;								\
-}
 
 	while(in < ine) {
 	    pair = find_match(in,ine);
 
 		if(pair.len) {
-
 			//lazy match
 			i = 0;
 			do {
@@ -145,17 +131,12 @@ static UBMP32 lz_encode(UBMP8* in_table,UBMP8* out_table,UBMP32 size) {
 					pair = pair1;
 
 					//write literal byte
-					WRITE_LITERAL();
+					bs.writeliteral(*in);
 
 					LINK::list[*in].add(in);
 					in++;
 
-					while(length >= 8) {
-						length -= 8;
-						*out++ = UBMP8((code >> length) & _byte_1);
-						code &= (_byte_all >> (64 - length));
-					}
-					
+					bs.writebits();
 				} else {
 					break;
 				}
@@ -163,32 +144,22 @@ static UBMP32 lz_encode(UBMP8* in_table,UBMP8* out_table,UBMP32 size) {
 			} while(in < ine && i < pair.len);
 
             //write pair bytes
-			WRITE_PAIR();
+			bs.writepair(pair);
 
 			for(i = 0;i < pair.len;i++) {
 				LINK::list[*in].add(in);
 				in++;
 			}
-
 		} else {
-
 			//write literal byte
-			WRITE_LITERAL();
+			bs.writeliteral(*in);
 
 			LINK::list[*in].add(in);
 			in++;
 		}
-
-		while(length >= 8) {
-			length -= 8;
-			*out++ = UBMP8((code >> length) & _byte_1);
-			code &= (_byte_all >> (64 - length));
-		}
+		bs.writebits();
 	}
-	if(length) {
-		length -= 8;
-		*out++ = UBMP8((code  << (-length)) & _byte_1);
-	}
+	bs.flushbits();
 
 	return int(out - out_table);
 }
@@ -349,9 +320,284 @@ void HUFFMAN::clear_nodes() {
 		nodes[i].clear();
 	}
 }
+
 /*
-Debugging
+collect statistics
 */
+void COMP_INFO::collect_frequency(const UBMP8* in_table,const UBMP32 size) {
+
+	const UBMP8* in = in_table;
+	const UBMP8* ine = in_table + size;
+	UBMP8* out;
+	BITSET bs(in,out);
+	PAIR pair;
+	UBMP32 v,d;
+
+    while(in < ine) {
+		v = bs.getbits(1);
+        if(v == 1) {
+			v = bs.getbits(PAIR_BITS);
+			pair.len = (v >> DISTANCE_BITS);
+			pair.pos = (v & (_byte_32 >> (32 - DISTANCE_BITS)));
+
+			l_code(d,pair.len);
+			d += LENGTH_MARKER;
+			huffman.nodes[d].symbol = d;
+			huffman.nodes[d].freq++;
+		    huffman.nodes[d].skip = 0;
+		
+			d_code(d,pair.pos);
+			huffman_pos.nodes[d].symbol = d;
+			huffman_pos.nodes[d].freq++;
+			huffman_pos.nodes[d].skip = 0;
+            
+		} else {
+			v = bs.getbits(LITERAL_BITS);
+			huffman.nodes[v].symbol = v;
+			huffman.nodes[v].freq++;
+		    huffman.nodes[v].skip = 0;
+		}
+	}
+}
+/*
+encode
+*/
+int COMP_INFO::encode_huff(
+				    const UBMP8* in_table,
+		            UBMP8* out_table,
+					const UBMP32 size
+				 ) {
+
+	const UBMP8* in = in_table;
+	const UBMP8* ine = in_table + size;
+	UBMP8* out = out_table;
+	BITSET bs(in,out);
+	BITSET bso(in,out);
+	PAIR pair;
+	UBMP32 v,d;
+	int extra;
+	CANN  *pcann;
+
+    while(in < ine) {
+		v = bs.getbits(1);
+        if(v == 1) {
+			v = bs.getbits(PAIR_BITS);
+			pair.len = (v >> DISTANCE_BITS);
+			pair.pos = (v & (_byte_32 >> (32 - DISTANCE_BITS)));
+			//length
+			l_code(d,pair.len);
+			pcann = &huffman.cann[d + LENGTH_MARKER];
+			bso.write(pcann->code,pcann->length);
+
+			extra = extra_lbits[d];
+			if (extra != 0)
+				bso.write(pair.len - base_length[d],extra);
+
+			//distance
+			d_code(d,pair.pos);
+			pcann = &huffman_pos.cann[d];
+			bso.write(pcann->code,pcann->length);
+
+			extra = extra_dbits[d];
+			if (extra != 0)
+				bso.write(pair.pos - base_dist[d],extra);
+		} else {
+			v = bs.getbits(LITERAL_BITS);
+            //literal
+			pcann = &huffman.cann[v];
+			bso.write(pcann->code,pcann->length);
+		}
+		//write all bits
+		bso.writebits();
+	}
+
+	//end of block marker
+	pcann = &huffman.cann[EOB_MARKER];
+	bso.write(pcann->code,pcann->length);
+
+	//finish
+	bso.writebits();
+	bso.flushbits();
+
+	return int(out - out_table);
+}
+/***********************************
+ * compress
+ **********************************/
+void COMP_INFO::compress(FILE* inputf,FILE* outputf,int type) {
+	UBMP8 *in_table,*out_table;
+	UBMP32 i,buffer_size,index_start;
+
+	//allocate tables
+	in_table    = new UBMP8[2 * BLOCK_SIZE];
+	out_table   = new UBMP8[2 * BLOCK_SIZE];
+	huffman.cann = new CANN[huffman.MAX_LEAFS];
+	huffman.nodes = new NODE[huffman.MAX_NODES];
+	huffman_pos.cann = new CANN[huffman_pos.MAX_LEAFS];
+	huffman_pos.nodes = new NODE[huffman_pos.MAX_NODES];
+
+	/**********************************************************
+     * Compress using Lempel Ziv and collect frequencey of symbols
+	 **********************************************************/
+	char temp_name[512];
+	sprintf(temp_name,"%s.lz",output_fname);
+
+	std::list<UBMP32> lindex;
+	{
+		if(type == 0) {
+			pf = fopen(temp_name,"wb");
+		} else {
+			pf = outputf;
+			fseek(inputf,0,SEEK_END);
+			UBMP32 TB_SIZE = ftell(inputf);
+			fseek(inputf,0,SEEK_SET);
+			n_blocks = int(ceil(double(TB_SIZE) / BLOCK_SIZE));
+			fseek(pf,56 + (n_blocks + 1) * 4,SEEK_SET);
+		}
+
+		bool last = false;
+		n_blocks = 0;
+		cmpsize = 0;
+		orgsize = 0;
+		while(!last) {
+			lindex.push_back(cmpsize);
+
+			buffer_size = (UBMP32)fread(in_table,1,BLOCK_SIZE,inputf);
+			if(buffer_size < BLOCK_SIZE)
+				last = true;
+			orgsize += buffer_size;
+
+			buffer_size = encode_lz(in_table,out_table,buffer_size);
+			if(type == 0)
+				collect_frequency(out_table,buffer_size);
+			
+			fwrite(out_table,1,buffer_size,pf);
+
+			cmpsize += buffer_size;
+			n_blocks++;
+		}
+		lindex.push_back(cmpsize);
+
+		if(type == 0)
+			fclose(pf);
+		else
+			rewind(pf);
+	}
+	std::vector<UBMP32> vindex(lindex.begin(), lindex.end());
+	lindex.clear();
+	
+	if(type == 0) {
+		//end of block marker
+		huffman.nodes[EOB_MARKER].symbol = EOB_MARKER;
+		huffman.nodes[EOB_MARKER].freq = 1;
+		huffman.nodes[EOB_MARKER].skip = 0;
+
+		//build cannonical huffman code
+		huffman.build_cann_from_nodes();
+		huffman_pos.build_cann_from_nodes();
+	}
+
+	/************************
+	 * write header of file
+	 ************************/
+	//write count
+	fwrite(&orgsize,4,1,outputf);
+	fwrite(&cmpsize,4,1,outputf);
+    fwrite(&n_blocks,4,1,outputf);
+	block_size = BLOCK_SIZE;
+	fwrite(&block_size,4,1,outputf);
+
+	//write reserve bytes
+	fseek(outputf,40,SEEK_CUR);
+
+	//write lengths
+	if(type == 0) {
+		for(i = 0;i < huffman.MAX_LEAFS;i++)
+			fwrite(&huffman.cann[i].length,1,1,outputf);
+		for(i = 0;i < huffman_pos.MAX_LEAFS;i++)
+			fwrite(&huffman_pos.cann[i].length,1,1,outputf);
+	}
+
+	//write index table
+	index_start = ftell(outputf);
+	fwrite(&vindex[0],4,n_blocks + 1,outputf);
+
+	/***********************************
+	 * Compress using huffman
+	 ***********************************/
+	if(type == 0)
+	{
+		FILE* inf = fopen(temp_name,"rb");
+
+		cmpsize = 0;
+		for(i = 0; i < n_blocks;i++) {
+			buffer_size = vindex[i + 1] - vindex[i];
+			vindex[i] = cmpsize;
+
+			fread(in_table,1,buffer_size,inf);
+			buffer_size = encode_huff(in_table,out_table,buffer_size);
+			fwrite(out_table,1,buffer_size,outputf);
+
+			cmpsize += buffer_size;
+		}
+		vindex[i] = cmpsize;
+
+		//write updated index info
+		fseek(outputf,index_start,SEEK_SET);
+		fwrite(&vindex[0],4,n_blocks + 1,outputf);
+
+		fclose(inf);
+		remove(temp_name);
+	}
+
+	//free memory
+	delete[] in_table;
+	delete[] out_table;
+	delete[] huffman.cann;
+	delete[] huffman.nodes;
+	delete[] huffman_pos.cann;
+	delete[] huffman_pos.nodes;
+}
+
+/**************************************
+Cyclic Redundancy Check (CRC)
+***************************************/
+void COMP_INFO::write_crc(bool wrt) {
+	unsigned int bufLen;
+    unsigned char buf[BLOCK_SIZE];
+	unsigned long outCrc32 = 0,savedCrc32;
+
+	pf = fopen(output_fname,"rb+");
+	if(!pf) return;
+	bufLen = (unsigned int) fread(buf,1,16,pf);
+	outCrc32 = Crc32_ComputeBuf(outCrc32, buf,bufLen);
+	fread(&savedCrc32,4,1,pf);
+#ifdef BIGENDIAN
+	bswap32(savedCrc32);
+#endif
+	fseek(pf,56,SEEK_SET);
+    while(true) {
+        bufLen = (unsigned int) fread(buf,1,BLOCK_SIZE,pf);
+		if(bufLen == 0) break;
+        outCrc32 = Crc32_ComputeBuf(outCrc32, buf, bufLen);
+    }
+	if(wrt) {
+		fseek(pf,16,SEEK_SET);
+		fwrite(&outCrc32,4,1,pf);
+	}
+	fclose(pf);
+
+	if(!wrt) {
+		if(savedCrc32 != outCrc32)
+			printf("\"%s\" is Corrupted!!!\n",output_fname);
+		else
+			printf("\"%s\" is OK!\n",output_fname);
+	}
+}
+/****************
+*Debugging
+*****************/
+#ifdef _DEBUG
 static void display(int b,int length) {
 	char temp[256];
 	strcpy(temp,""); 
@@ -388,296 +634,4 @@ void HUFFMAN::print_all_cann() {
 		}
 	}
 }
-/*
-collect statistics
-*/
-void COMP_INFO::collect_frequency(UBMP8* in_table,UBMP32 size) {
-
-	UBMP8* in = in_table;
-	UBMP8* ine = in_table + size;
-	UBMP8  length = 0;
-	UBMP64 code = 0;
-	PAIR pair;
-	UBMP32 v,d;
-
-    while(in < ine) {
-		getbits(1,v);
-        if(v == 1) {
-			getbits(PAIR_BITS,v);
-			pair.len = (v >> DISTANCE_BITS);
-			pair.pos = (v & (_byte_32 >> (32 - DISTANCE_BITS)));
-
-			l_code(d,pair.len);
-			d += LENGTH_MARKER;
-			huffman.nodes[d].symbol = d;
-			huffman.nodes[d].freq++;
-		    huffman.nodes[d].skip = 0;
-		
-			d_code(d,pair.pos);
-			huffman_pos.nodes[d].symbol = d;
-			huffman_pos.nodes[d].freq++;
-			huffman_pos.nodes[d].skip = 0;
-            
-		} else {
-			getbits(LITERAL_BITS,v);
-			huffman.nodes[v].symbol = v;
-			huffman.nodes[v].freq++;
-		    huffman.nodes[v].skip = 0;
-		}
-	}
-}
-/*
-encode
-*/
-int COMP_INFO::encode(
-				    UBMP8* in_table,
-		            UBMP8* out_table,
-					UBMP32 size
-				 ) {
-
-	UBMP8* in = in_table;
-	UBMP8* ine = in_table + size;
-	UBMP8* out = out_table;
-
-	UBMP8 length = 0;
-	UBMP64 code = 0;
-
-	UBMP8 o_length = 0;
-	UBMP64 o_code = 0;
-
-	PAIR pair;
-	UBMP32 v,d;
-
-	int extra;
-
-	CANN  *pcann;
-
-    while(in < ine) {
-		getbits(1,v);
-        if(v == 1) {
-			getbits(PAIR_BITS,v);
-			pair.len = (v >> DISTANCE_BITS);
-			pair.pos = (v & (_byte_32 >> (32 - DISTANCE_BITS)));
-
-			//length
-			l_code(d,pair.len);
-			pcann = &huffman.cann[d + LENGTH_MARKER];
-			o_code = ((o_code << pcann->length) | pcann->code);
-			o_length += pcann->length;
-
-			extra = extra_lbits[d];
-			if (extra != 0) {
-				o_code = ((o_code << extra) | (pair.len - base_length[d]));
-				o_length += extra;
-			}
-
-			//distance
-			d_code(d,pair.pos);
-			pcann = &huffman_pos.cann[d];
-			o_code = ((o_code << pcann->length) | pcann->code);
-			o_length += pcann->length;
-
-			extra = extra_dbits[d];
-			if (extra != 0) {
-				o_code = ((o_code << extra) | (pair.pos - base_dist[d]));
-				o_length += extra;
-			}
-			
-		} else {
-			getbits(LITERAL_BITS,v);
-
-            //literal
-			pcann = &huffman.cann[v];
-			o_code = ((o_code << pcann->length) | pcann->code);
-			o_length += pcann->length;
-		}
-
-		//output
-		while(o_length >= 8) {
-			o_length -= 8;
-			*out++ = UBMP8((o_code >> o_length) & _byte_1);
-			o_code &= (_byte_all >> (64 - o_length));
-		}
-	}
-
-	//end of block marker
-	pcann = &huffman.cann[EOB_MARKER];
-	o_code = ((o_code << pcann->length) | pcann->code);
-	o_length += pcann->length;
-
-	//flush everything b/s we are going to finish
-	while(o_length >= 8) {
-		o_length -= 8;
-		*out++ = UBMP8((o_code >> o_length) & _byte_1);
-		o_code &= (_byte_all >> (64 - o_length));
-	}
-
-	if(o_length) {
-		o_length -= 8;
-		*out++ = UBMP8((o_code  << (-o_length)) & _byte_1);
-	}
-
-	return int(out - out_table);
-}
-/***********************************
- * compress
- **********************************/
-void COMP_INFO::compress(FILE* inputf,FILE* outputf) {
-	UBMP8 *in_table,*out_table;
-	UBMP32 i,buffer_size,index_start;
-	BMP32 temp;
-
-	//allocate tables
-	in_table    = new UBMP8[2 * BLOCK_SIZE];
-	out_table   = new UBMP8[2 * BLOCK_SIZE];
-	huffman.cann = new CANN[huffman.MAX_LEAFS];
-	huffman.nodes = new NODE[huffman.MAX_NODES];
-	huffman_pos.cann = new CANN[huffman_pos.MAX_LEAFS];
-	huffman_pos.nodes = new NODE[huffman_pos.MAX_NODES];
-
-	/**********************************************************
-     * Compress using Lempel Ziv and collect frequencey
-	 **********************************************************/
-	char temp_name[512];
-	sprintf(temp_name,"%s.lz",output_fname);
-
-	std::list<UBMP32> lindex;
-	{
-		pf = fopen(temp_name,"wb");
-
-		bool last = false;
-		n_blocks = 0;
-		cmpsize = 0;
-		orgsize = 0;
-		while(!last) {
-			lindex.push_back(cmpsize);
-
-			buffer_size = (UBMP32)fread(in_table,1,BLOCK_SIZE,inputf);
-			if(buffer_size < BLOCK_SIZE)
-				last = true;
-			orgsize += buffer_size;
-
-			buffer_size = lz_encode(in_table,out_table,buffer_size);
-			collect_frequency(out_table,buffer_size);
-
-			fwrite(out_table,1,buffer_size,pf);
-
-			cmpsize += buffer_size;
-			n_blocks++;
-		}
-		lindex.push_back(cmpsize);
-		size = n_blocks * BLOCK_SIZE;
-
-		//end of block marker
-		huffman.nodes[EOB_MARKER].symbol = EOB_MARKER;
-		huffman.nodes[EOB_MARKER].freq = 1;
-		huffman.nodes[EOB_MARKER].skip = 0;
-
-		fclose(pf);
-
-		//build cannonical huffman code
-		huffman.build_cann_from_nodes();
-		huffman_pos.build_cann_from_nodes();
-	}
-	std::vector<UBMP32> vindex(lindex.begin(), lindex.end());
-	lindex.clear();
-
-	/************************
-	 * write header of file
-	 ************************/
-	//write count
-	fwrite(&orgsize,4,1,outputf);
-	fwrite(&cmpsize,4,1,outputf);
-    fwrite(&n_blocks,4,1,outputf);
-	block_size = BLOCK_SIZE;
-	fwrite(&block_size,4,1,outputf);
-
-	//write reserve bytes
-	for(i = 0;i < 10;i++)
-	   fwrite(&temp,4,1,outputf);
-
-	//write length
-	for(i = 0; i < huffman.MAX_LEAFS; i++)
-		fwrite(&huffman.cann[i].length,1,1,outputf);
-
-	//write length
-	for(i = 0; i < huffman_pos.MAX_LEAFS; i++)
-		fwrite(&huffman_pos.cann[i].length,1,1,outputf);
-
-	index_start = ftell(outputf);
-
-	//write index table
-	for(i = 0; i < n_blocks + 1;i++)
-		fwrite(&vindex[i],4,1,outputf);
-
-	/***********************************
-	 * Compress using huffman
-	 ***********************************/
-	{
-		FILE* inf = fopen(temp_name,"rb");
-
-		cmpsize = 0;
-		for(i = 0; i < n_blocks;i++) {
-			buffer_size = vindex[i + 1] - vindex[i];
-			vindex[i] = cmpsize;
-
-			fread(in_table,1,buffer_size,inf);
-			buffer_size = encode(in_table,out_table,buffer_size);
-			fwrite(out_table,1,buffer_size,outputf);
-
-			cmpsize += buffer_size;
-		}
-		vindex[i] = cmpsize;
-
-		//write updated index info
-		fseek(outputf,index_start,SEEK_SET);
-
-		for(i = 0; i < n_blocks + 1;i++)
-			fwrite(&vindex[i],4,1,outputf);
-
-		fclose(inf);
-		remove(temp_name);
-	}
-
-	//free memory
-	delete[] in_table;
-	delete[] out_table;
-	delete[] huffman.cann;
-	delete[] huffman.nodes;
-	delete[] huffman_pos.cann;
-	delete[] huffman_pos.nodes;
-}
-
-/**************************************
-Cyclic Redundancy Check (CRC)
-***************************************/
-void COMP_INFO::write_crc(bool wrt) {
-	unsigned int bufLen;
-    unsigned char buf[BLOCK_SIZE];
-	unsigned long outCrc32 = 0,savedCrc32;
-
-	pf = fopen(output_fname,"rb+");
-	if(!pf) return;
-	bufLen = (unsigned int) fread(buf,1,16,pf);
-	outCrc32 = Crc32_ComputeBuf(outCrc32, buf,bufLen);
-	savedCrc32 = (UBMP32) read_bytes(4);
-	fseek(pf,56,SEEK_SET);
-    while(true) {
-        bufLen = (unsigned int) fread(buf,1,BLOCK_SIZE,pf);
-		if(bufLen == 0) break;
-        outCrc32 = Crc32_ComputeBuf(outCrc32, buf, bufLen);
-    }
-	if(wrt) {
-		fseek(pf,16,SEEK_SET);
-		fwrite(&outCrc32,4,1,pf);
-	}
-	fclose(pf);
-
-	if(!wrt) {
-		if(savedCrc32 != outCrc32) {
-			printf("\"%s\" is Corrupted!!!\n",output_fname);
-		} else {
-			printf("\"%s\" is OK!\n",output_fname);
-		}
-	}
-}
+#endif

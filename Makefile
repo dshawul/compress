@@ -1,5 +1,9 @@
-CC = g++
-CFLAGS = -O3 -g
+#CC = g++
+#CFLAGS = -O3 -Wno-unused-result
+
+CC = x86_64-w64-mingw32-g++
+CFLAGS = -O3 -Wno-unused-result -static
+
 DEFINES =
 LDFLAGS = 
 
@@ -13,4 +17,4 @@ $(EXE): $(OBJ)
 %.o: %.cpp
 	$(CC) $(CFLAGS) $(DEFINES) -c $<
 clean:
-	$(RM) $(OBJ)
+	$(RM) $(OBJ) $(EXE)
